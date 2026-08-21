@@ -1,26 +1,56 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
+repair_webrtc_sfu(){
+  systemctl restart bbb-webrtc-sfu.service || true
+  systemctl is-active --quiet bbb-webrtc-sfu.service && return 0
+  if journalctl --no-pager -u bbb-webrtc-sfu.service -n 120 | grep -Eq '214/SETSCHEDULER|Failed at step SETSCHEDULER|Operation not permitted.*schedul'; then
+    echo "Detected unsupported real-time scheduler for bbb-webrtc-sfu, applying the official systemd override"
+    install -d -m 0755 /etc/systemd/system/bbb-webrtc-sfu.service.d
+    printf '%s\n' '[Service]' 'CPUSchedulingPolicy=other' 'Nice=-10' > /etc/systemd/system/bbb-webrtc-sfu.service.d/override.conf
+    systemctl daemon-reload
+    systemctl restart bbb-webrtc-sfu.service
+  fi
+  if ! systemctl is-active --quiet bbb-webrtc-sfu.service; then
+    systemctl --no-pager --full status bbb-webrtc-sfu.service || true
+    journalctl --no-pager -u bbb-webrtc-sfu.service -n 160 || true
+    echo "bbb-webrtc-sfu is still unavailable" >&2
+    return 1
+  fi
+}
+
+guard_recording_worker(){
+  if [ -f /var/lib/bcp/telegram-local.ready ]; then
+    systemctl enable --now bcp-worker
+  else
+    systemctl disable --now bcp-worker 2>/dev/null || true
+    echo "bcp-worker: safely disabled until Telegram migration is complete"
+  fi
+}
+
 case "${1:-}" in
   health)
     echo "provision-state: $(cat /var/lib/bcp/provision/state 2>/dev/null || echo unknown)"
     systemctl --no-pager status bcp-provision.service 2>/dev/null || true
     bbb-conf --check
     systemctl --no-pager --failed
-    systemctl is-active bbb-rap-resque-worker bcp-worker telegram-bot-api
+    systemctl is-active bbb-rap-resque-worker telegram-bot-api
+    if [ -f /var/lib/bcp/telegram-local.ready ]; then systemctl is-active bcp-worker; else echo "inactive (expected: Telegram migration pending)"; fi
     df -h / /var/bigbluebutton
     ;;
   repair)
     bbb-conf --check
     systemctl restart bbb-rap-resque-worker telegram-bot-api
-    if [ -f /var/lib/bcp/telegram-local.ready ]; then systemctl restart bcp-worker; fi
     bbb-conf --restart
+    repair_webrtc_sfu
+    guard_recording_worker
     ;;
   restart) bbb-conf --restart ;;
   start) bbb-conf --start ;;
   stop) bbb-conf --stop ;;
   queue) find /var/lib/bcp/jobs -maxdepth 1 -type f -printf '%f\n' ;;
   logs)
-    journalctl --no-pager -n 250 -u bcp-provision -u bcp-worker -u telegram-bot-api -u bbb-rap-resque-worker
+    journalctl --no-pager -n 300 -u bcp-provision -u bcp-worker -u telegram-bot-api -u bbb-rap-resque-worker -u bbb-webrtc-sfu
     ;;
   provision-status)
     echo "state: $(cat /var/lib/bcp/provision/state 2>/dev/null || echo unknown)"
