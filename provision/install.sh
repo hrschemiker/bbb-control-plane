@@ -176,7 +176,7 @@ run_upstream_installer(){
   curl -fL --retry 5 --retry-delay 5 --connect-timeout 30 https://raw.githubusercontent.com/bigbluebutton/bbb-install/v3.0.x-release/bbb-install.sh -o /tmp/bbb-install.sh
   chmod 0700 /tmp/bbb-install.sh
   set +e
-  timeout --signal=TERM --kill-after=120s 7200s stdbuf -oL -eL bash /tmp/bbb-install.sh -v jammy-300 -s "$BBB_HOSTNAME" -e "$LETSENCRYPT_EMAIL" -w -g 2>&1 | tee -a "$STATE_DIR/upstream-attempt-$attempt.log"
+  timeout --signal=TERM --kill-after=120s 7200s stdbuf -oL -eL bash -c 'umask 022; exec bash /tmp/bbb-install.sh "$@"' _ -v jammy-300 -s "$BBB_HOSTNAME" -e "$LETSENCRYPT_EMAIL" -w -g 2>&1 | tee -a "$STATE_DIR/upstream-attempt-$attempt.log"
   result=${PIPESTATUS[0]}
   set -e
   return "$result"
@@ -223,7 +223,7 @@ if [ -f /usr/local/bigbluebutton/core/scripts/video.yml ]; then
 fi
 
 phase installing_telegram_transport
-install -d -m 0750 /opt/telegram-bot-api /var/lib/telegram-bot-api
+install -d -m 0750 /opt/telegram-bot-api /var/lib/telegram-bot-api /var/lib/telegram-bot-api/temp
 docker pull aiogram/telegram-bot-api:latest
 envsubst '${TELEGRAM_API_ID} ${TELEGRAM_API_HASH}' < /opt/bbb-control-plane/source/provision/telegram-bot-api.service.in > /etc/systemd/system/telegram-bot-api.service
 install -m 0755 /opt/bbb-control-plane/source/provision/telegram-migrate.py /usr/local/lib/bcp-telegram-migrate.py
