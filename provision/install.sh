@@ -24,7 +24,7 @@ if [ "${1:-}" = --preflight ]; then preflight; exit 0; fi
 preflight
 [ -f /etc/bbb-control-plane.env ] || die "/etc/bbb-control-plane.env is missing"
 set -a; . /etc/bbb-control-plane.env; set +a
-for key in BBB_HOSTNAME LETSENCRYPT_EMAIL WORDPRESS_URL BRIDGE_SHARED_SECRET TELEGRAM_BOT_TOKEN TELEGRAM_API_ID TELEGRAM_API_HASH TELEGRAM_ARCHIVE_CHAT_ID; do
+for key in BBB_HOSTNAME LETSENCRYPT_EMAIL WORDPRESS_URL BRIDGE_SHARED_SECRET TELEGRAM_BOT_TOKEN TELEGRAM_API_ID TELEGRAM_API_HASH TELEGRAM_ARCHIVE_CHAT_ID GREENLIGHT_ADMIN_NAME GREENLIGHT_ADMIN_EMAIL GREENLIGHT_ADMIN_PASSWORD; do
   [ -n "${!key:-}" ] || die "$key is required"
 done
 resolved=$(getent ahostsv4 "$BBB_HOSTNAME" | awk 'NR==1{print $1}')
@@ -37,7 +37,12 @@ apt-get install -y ca-certificates curl jq ufw fail2ban python3 python3-venv ffm
 
 log "installing BigBlueButton 3.0 with the upstream installer"
 curl -fsSL https://raw.githubusercontent.com/bigbluebutton/bbb-install/v3.0.x-release/bbb-install.sh -o /tmp/bbb-install.sh
-bash /tmp/bbb-install.sh -v jammy-300 -s "$BBB_HOSTNAME" -e "$LETSENCRYPT_EMAIL" -w
+bash /tmp/bbb-install.sh -v jammy-300 -s "$BBB_HOSTNAME" -e "$LETSENCRYPT_EMAIL" -w -g
+
+log "creating the Greenlight administrator when absent"
+if docker ps --format '{{.Names}}' | grep -qx greenlight-v3; then
+  docker exec greenlight-v3 bundle exec rake "admin:create[$GREENLIGHT_ADMIN_NAME,$GREENLIGHT_ADMIN_EMAIL,$GREENLIGHT_ADMIN_PASSWORD]" || log "Greenlight administrator already exists or requires review"
+fi
 
 log "enabling composite recording workflow"
 apt-get install -y bbb-playback-video

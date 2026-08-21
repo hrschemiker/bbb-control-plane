@@ -28,6 +28,10 @@ flowchart TD
 - One-at-a-time conversion and upload queues
 - Health, disk-pressure, TLS, service, and recording diagnostics
 - Dry-run mode for every destructive maintenance operation
+- Greenlight v3 deployment and direct administration access
+- Persistent workstation profile with operating-system credential storage
+- Progress indication, copyable logs, and exportable diagnostic reports
+- Start, stop, restart, repair, queue, and service-log controls
 
 ## Quick start
 
@@ -46,6 +50,7 @@ Secrets are never committed. The controller generates the bridge secret, transmi
 | Path | Responsibility |
 |---|---|
 | `controller.py` | Local graphical controller and SSH orchestration |
+| `assets/` | Bundled VT323 interface font and license |
 | `provision/` | Idempotent node bootstrap and systemd assets |
 | `worker/` | Recording validation, transport upload, callback, retention |
 | `wordpress/` | Additive application bridge |

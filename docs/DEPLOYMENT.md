@@ -48,16 +48,17 @@ The controller generates `BRIDGE_SHARED_SECRET` automatically. It builds the pri
 ## Controller workflow
 
 1. Start `controller.py`.
-2. Enter the server connection, hostname, WordPress, and Telegram values directly in the controller.
+2. Enter the server connection, hostname, WordPress, Telegram, and Greenlight administrator values directly in the controller.
 3. Select `Preflight`.
 4. Correct every failure.
 5. Select `Provision`.
 6. Keep the generated recovery file from the path reported by the controller.
-7. Install the bridge ZIP in WordPress.
-8. Copy the same bridge secret into Tools, Recording Transport.
-9. Apply the minimal compatibility patch to the booking plugin.
-10. Run a short meeting with presentation, screen share, audio, and webcam.
-11. End the meeting and observe `bcpctl queue` until the job moves to `done`.
+7. Open Greenlight and its administrator panel from the Management tab.
+8. Install the bridge ZIP in WordPress.
+9. Copy the same bridge secret into Tools, Recording Transport.
+10. Apply the minimal compatibility patch to the booking plugin.
+11. Run a short meeting with presentation, screen share, audio, and webcam.
+12. End the meeting and observe the recording queue from the Management tab.
 
 ## Non-destructive application upgrade
 

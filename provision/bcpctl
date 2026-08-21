@@ -12,6 +12,12 @@ case "${1:-}" in
     systemctl restart bbb-rap-resque-worker bcp-worker telegram-bot-api
     bbb-conf --restart
     ;;
+  restart) bbb-conf --restart ;;
+  start) bbb-conf --start ;;
+  stop) bbb-conf --stop ;;
   queue) find /var/lib/bcp/jobs -maxdepth 1 -type f -printf '%f\n' ;;
-  *) echo "usage: bcpctl {health|repair|queue}" >&2; exit 2 ;;
+  logs)
+    journalctl --no-pager -n 250 -u bcp-worker -u telegram-bot-api -u bbb-rap-resque-worker
+    ;;
+  *) echo "usage: bcpctl {health|repair|restart|start|stop|queue|logs}" >&2; exit 2 ;;
 esac
