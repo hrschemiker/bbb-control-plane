@@ -1,2 +1,70 @@
-# bbb-control-plane
-Deterministic control plane for single-node WebRTC provisioning, composite media publication, bounded retention, and external object transport.
+# Deterministic Media Control Plane
+
+[![CI](https://github.com/hrschemiker/bbb-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/hrschemiker/bbb-control-plane/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-0f766e.svg)](LICENSE)
+
+An idempotent control plane for provisioning a single-node, WebRTC-oriented media workload, publishing composite recording artifacts, maintaining bounded retention, and relaying immutable media references through an external object transport.
+
+## System topology
+
+```mermaid
+flowchart TD
+    C[Desktop Controller] -->|SSH| N[Media Node]
+    N --> R[Recording Pipeline]
+    R --> T[Object Transport]
+    R -->|Signed callback| W[Application Bridge]
+    W -->|Reference reuse| T
+```
+
+## Properties
+
+- Idempotent preflight and provisioning stages
+- Ubuntu 22.04 and BigBlueButton 3.0 target profile
+- Presentation and composite H.264 recording workflows
+- Local Telegram Bot API transport for objects up to 2000 MB
+- HMAC-authenticated application callbacks with replay protection
+- Append-only WordPress schema migration
+- Bounded raw, presentation, and local composite retention
+- One-at-a-time conversion and upload queues
+- Health, disk-pressure, TLS, service, and recording diagnostics
+- Dry-run mode for every destructive maintenance operation
+
+## Quick start
+
+1. Create an `A` record for the selected media hostname and point it to the node's public IPv4 address.
+2. Wait until public DNS resolves to that address.
+3. Install Python 3.11 or later on the administration workstation.
+4. Copy `config/example.env` to a private location and complete the values.
+5. Run `python controller.py` and select **Preflight**.
+6. Run **Provision** only after every mandatory check passes.
+7. Install the generated WordPress bridge ZIP from the WordPress Plugins screen.
+
+Secrets are never committed. The controller transmits the generated node configuration through SSH with mode `0600` and removes staging material after installation.
+
+## Repository layout
+
+| Path | Responsibility |
+|---|---|
+| `controller.py` | Local graphical controller and SSH orchestration |
+| `provision/` | Idempotent node bootstrap and systemd assets |
+| `worker/` | Recording validation, transport upload, callback, retention |
+| `wordpress/` | Additive application bridge |
+| `patches/` | Minimal compatibility patch for the existing application |
+| `docs/` | Deployment, security, recovery, and operations references |
+| `tests/` | Unit and migration-safety checks |
+
+## Safety contract
+
+The project does not delete application bookings, learning sessions, existing recording links, WordPress users, or payment data. New persistence uses an isolated table. Local media deletion requires a verified Telegram object reference and expiry of the configured grace period.
+
+## Documentation
+
+- [Deployment](docs/DEPLOYMENT.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Operations](docs/OPERATIONS.md)
+- [Security](docs/SECURITY.md)
+- [Recovery](docs/RECOVERY.md)
+
+## License
+
+MIT

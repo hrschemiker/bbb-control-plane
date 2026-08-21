@@ -1,0 +1,19 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m compileall controller.py worker provision
+      - run: bash -n provision/install.sh provision/bcpctl
+      - run: php -l wordpress/gtbp-recording-bridge/gtbp-recording-bridge.php
+      - run: python -m unittest discover -s tests -v
+      - run: python -c "from pathlib import Path; bad=chr(8212); assert not any(bad in p.read_text(errors='ignore') for p in Path('.').rglob('*') if p.is_file() and '.git' not in p.parts and p.suffix != '.zip')"

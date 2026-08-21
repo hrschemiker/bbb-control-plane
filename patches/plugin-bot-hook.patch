@@ -1,0 +1,7 @@
+--- a/german-teacher-booking.php
++++ b/german-teacher-booking.php
+@@
+     private function show_bot_videos($platform, $token, $chat_id, $state) {
++        $handled = apply_filters('gtbp_bot_videos_handled', false, $platform, $token, $chat_id, $state, $this);
++        if ($handled) return;
+         $user = $this->bot_user_from_state($state);

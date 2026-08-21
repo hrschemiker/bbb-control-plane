@@ -1,0 +1,13 @@
+[Unit]
+Description=Recording retention enforcement
+
+[Service]
+Type=oneshot
+User=bigbluebutton
+Group=bigbluebutton
+EnvironmentFile=/etc/bbb-control-plane.env
+ExecStart=/usr/bin/python3 /usr/local/lib/bcp-worker.py retention
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/bcp /var/bigbluebutton

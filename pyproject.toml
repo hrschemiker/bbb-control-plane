@@ -1,0 +1,8 @@
+[project]
+name = "bbb-control-plane"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = ["paramiko==3.5.1"]
+
+[project.scripts]
+bcp-controller = "controller:App"
