@@ -93,6 +93,49 @@ greenlight_healthy(){
   docker ps --format '{{.Names}}' 2>/dev/null | grep -qx greenlight-v3
 }
 
+greenlight_database_ready(){
+  greenlight_healthy || return 1
+  docker exec greenlight-v3 bundle exec rails runner 'ActiveRecord::Base.connection.execute("SELECT 1")' >/dev/null 2>&1
+}
+
+prepare_greenlight_database(){
+  phase repairing_greenlight_database
+  greenlight_healthy || die "Greenlight container is not running"
+  attempt=1
+  while [ "$attempt" -le 5 ]; do
+    if docker exec greenlight-v3 bundle exec rails db:prepare; then
+      greenlight_database_ready && return 0
+    fi
+    log "Greenlight database is not ready, retrying ($attempt/5)"
+    sleep 10
+    attempt=$((attempt+1))
+  done
+  docker logs --tail 120 greenlight-v3 2>&1 || true
+  die "Greenlight database could not be prepared"
+}
+
+create_or_promote_greenlight_admin(){
+  if docker exec greenlight-v3 bundle exec rake "admin:create[$GREENLIGHT_ADMIN_NAME,$GREENLIGHT_ADMIN_EMAIL,$GREENLIGHT_ADMIN_PASSWORD]"; then
+    log "Greenlight administrator created"
+    return
+  fi
+  log "Administrator may already exist, ensuring the configured account has the administrator role"
+  if docker exec greenlight-v3 bundle exec rake "user:set_admin_role[$GREENLIGHT_ADMIN_EMAIL]"; then
+    log "Greenlight administrator role verified"
+    return
+  fi
+  die "Greenlight administrator could not be created or promoted"
+}
+
+start_required_service(){
+  service_name=$1
+  systemctl enable "$service_name"
+  if systemctl restart "$service_name"; then return 0; fi
+  systemctl --no-pager --full status "$service_name" || true
+  journalctl --no-pager -u "$service_name" -n 160 || true
+  die "$service_name failed to start"
+}
+
 backup_before_cleanup(){
   phase backing_up_partial_installation
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
@@ -157,7 +200,8 @@ install_or_resume_bbb
 
 phase configuring_greenlight
 greenlight_healthy || die "Greenlight container is not healthy after upstream installation"
-docker exec greenlight-v3 bundle exec rake "admin:create[$GREENLIGHT_ADMIN_NAME,$GREENLIGHT_ADMIN_EMAIL,$GREENLIGHT_ADMIN_PASSWORD]" || log "Greenlight administrator already exists or requires review"
+greenlight_database_ready || prepare_greenlight_database
+create_or_promote_greenlight_admin
 
 phase configuring_composite_recordings
 apt-get install -y bbb-playback-video
@@ -170,10 +214,10 @@ fi
 phase installing_telegram_transport
 install -d -m 0750 /opt/telegram-bot-api /var/lib/telegram-bot-api
 docker pull aiogram/telegram-bot-api:latest
-envsubst < /opt/bbb-control-plane/source/provision/telegram-bot-api.service.in > /etc/systemd/system/telegram-bot-api.service
+envsubst '${TELEGRAM_API_ID} ${TELEGRAM_API_HASH}' < /opt/bbb-control-plane/source/provision/telegram-bot-api.service.in > /etc/systemd/system/telegram-bot-api.service
 install -m 0755 /opt/bbb-control-plane/source/provision/telegram-migrate.py /usr/local/lib/bcp-telegram-migrate.py
 install -d -m 0755 /etc/bigbluebutton/nginx
-envsubst < /opt/bbb-control-plane/source/provision/telegram-gateway.nginx.in > /etc/bigbluebutton/nginx/telegram-gateway.nginx
+envsubst '${BRIDGE_SHARED_SECRET}' < /opt/bbb-control-plane/source/provision/telegram-gateway.nginx.in > /etc/bigbluebutton/nginx/telegram-gateway.nginx
 
 phase installing_recording_worker
 install -d -o bigbluebutton -g bigbluebutton -m 0750 /var/lib/bcp/jobs /var/lib/bcp/done /var/lib/bcp/failed
@@ -193,7 +237,9 @@ ufw allow 443/tcp
 ufw allow 16384:32768/udp
 ufw --force enable
 systemctl daemon-reload
-systemctl enable --now fail2ban telegram-bot-api bcp-retention.timer
+start_required_service fail2ban
+start_required_service telegram-bot-api
+start_required_service bcp-retention.timer
 systemctl enable bcp-worker
 nginx -t
 systemctl reload nginx

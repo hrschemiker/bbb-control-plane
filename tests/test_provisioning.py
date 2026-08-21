@@ -21,6 +21,21 @@ class ProvisioningSafetyTests(unittest.TestCase):
         self.assertIn("systemd-run", launcher)
         self.assertIn("HEARTBEAT", launcher)
 
+    def test_nginx_variables_survive_template_rendering(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        template = (ROOT / "provision" / "telegram-gateway.nginx.in").read_text(encoding="utf-8")
+        self.assertIn("envsubst '${BRIDGE_SHARED_SECRET}'", script)
+        self.assertIn("$http_x_bcp_gateway_secret", template)
+
+    def test_greenlight_database_is_repaired_before_admin_creation(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("bundle exec rails db:prepare", script)
+        self.assertLess(script.index("greenlight_database_ready || prepare_greenlight_database"), script.index("create_or_promote_greenlight_admin\n"))
+
+    def test_failed_services_emit_diagnostics(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn('journalctl --no-pager -u "$service_name" -n 160', script)
+
 
 if __name__ == "__main__":
     unittest.main()
