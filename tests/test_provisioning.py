@@ -36,6 +36,21 @@ class ProvisioningSafetyTests(unittest.TestCase):
         script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
         self.assertIn('journalctl --no-pager -u "$service_name" -n 160', script)
 
+    def test_sfu_scheduler_repair_is_guarded_by_journal_signature(self):
+        control = (ROOT / "provision" / "bcpctl").read_text(encoding="utf-8")
+        self.assertIn("214/SETSCHEDULER", control)
+        self.assertIn("CPUSchedulingPolicy=other", control)
+        self.assertIn("systemctl is-active --quiet bbb-webrtc-sfu.service", control)
+
+    def test_worker_is_disabled_until_telegram_migration(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("systemctl disable --now bcp-worker", script)
+
+    def test_provision_log_secrets_are_redacted(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn('text.replace(secret, "[REDACTED]")', script)
+        self.assertIn('admin:create[$GREENLIGHT_ADMIN_NAME,$GREENLIGHT_ADMIN_EMAIL,$GREENLIGHT_ADMIN_PASSWORD]" >/dev/null 2>&1', script)
+
 
 if __name__ == "__main__":
     unittest.main()

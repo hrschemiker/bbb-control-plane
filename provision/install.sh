@@ -35,13 +35,24 @@ exec 9>/var/lock/bcp-provision.lock
 flock -n 9 || die "another provisioning process is already running"
 install -d -m 0750 "$STATE_DIR"
 touch "$LOG_FILE"; chmod 0640 "$LOG_FILE"
-exec > >(tee -a "$LOG_FILE") 2>&1
 
 [ -f /etc/bbb-control-plane.env ] || die "/etc/bbb-control-plane.env is missing"
 set -a; . /etc/bbb-control-plane.env; set +a
 for key in BBB_HOSTNAME LETSENCRYPT_EMAIL WORDPRESS_URL BRIDGE_SHARED_SECRET TELEGRAM_BOT_TOKEN TELEGRAM_API_ID TELEGRAM_API_HASH TELEGRAM_ARCHIVE_CHAT_ID GREENLIGHT_ADMIN_NAME GREENLIGHT_ADMIN_EMAIL GREENLIGHT_ADMIN_PASSWORD; do
   [ -n "${!key:-}" ] || die "$key is required"
 done
+python3 - "$LOG_FILE" "$GREENLIGHT_ADMIN_PASSWORD" "$TELEGRAM_BOT_TOKEN" "$TELEGRAM_API_HASH" "$BRIDGE_SHARED_SECRET" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+for secret in sys.argv[2:]:
+    if secret:
+        text = text.replace(secret, "[REDACTED]")
+path.write_text(text, encoding="utf-8")
+PY
+exec > >(tee -a "$LOG_FILE") 2>&1
 resolved=$(getent ahostsv4 "$BBB_HOSTNAME" | awk 'NR==1{print $1}')
 public=$(curl -4fsS --max-time 10 https://api.ipify.org)
 [ "$resolved" = "$public" ] || die "DNS $resolved does not match public IPv4 $public"
@@ -115,12 +126,12 @@ prepare_greenlight_database(){
 }
 
 create_or_promote_greenlight_admin(){
-  if docker exec greenlight-v3 bundle exec rake "admin:create[$GREENLIGHT_ADMIN_NAME,$GREENLIGHT_ADMIN_EMAIL,$GREENLIGHT_ADMIN_PASSWORD]"; then
+  if docker exec greenlight-v3 bundle exec rake "admin:create[$GREENLIGHT_ADMIN_NAME,$GREENLIGHT_ADMIN_EMAIL,$GREENLIGHT_ADMIN_PASSWORD]" >/dev/null 2>&1; then
     log "Greenlight administrator created"
     return
   fi
   log "Administrator may already exist, ensuring the configured account has the administrator role"
-  if docker exec greenlight-v3 bundle exec rake "user:set_admin_role[$GREENLIGHT_ADMIN_EMAIL]"; then
+  if docker exec greenlight-v3 bundle exec rake "user:set_admin_role[$GREENLIGHT_ADMIN_EMAIL]" >/dev/null 2>&1; then
     log "Greenlight administrator role verified"
     return
   fi
@@ -248,7 +259,7 @@ phase validating_telegram_migration
 if /usr/bin/env python3 /usr/local/lib/bcp-telegram-migrate.py; then
   systemctl enable --now bcp-worker
 else
-  systemctl stop bcp-worker 2>/dev/null || true
+  systemctl disable --now bcp-worker 2>/dev/null || true
   log "Telegram migration is pending. Existing bot traffic remains on the cloud API."
   log "Configure the WordPress bridge, then select ACTIVATE TELEGRAM in the controller."
 fi
@@ -257,6 +268,7 @@ phase final_validation
 systemctl restart bbb-rap-resque-worker.service
 bbb-conf --setip "$BBB_HOSTNAME"
 bbb-conf --restart
+/usr/local/sbin/bcpctl repair
 nginx -t
 bbb-conf --check
 bbb-record --check
