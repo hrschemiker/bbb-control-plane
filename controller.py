@@ -55,6 +55,8 @@ def clean_value(name: str, value: str) -> str:
 class SSH:
     def __init__(self, host: str, port: int, user: str, key_path: str, password: str):
         known = Path.home() / ".ssh" / "known_hosts"
+        STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        paramiko.util.log_to_file(str(STATE_DIR / "ssh-protocol.log"), level="DEBUG")
         known.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         last_error: Exception | None = None
         for attempt in range(1, 4):
@@ -82,7 +84,10 @@ class SSH:
                 if attempt < 3:
                     time.sleep(5)
         else:
-            raise ControllerError(f"SSH did not become ready after 3 attempts: {last_error}")
+            raise ControllerError(
+                f"SSH did not become ready after 3 attempts: {last_error}. "
+                f"Protocol log: {STATE_DIR / 'ssh-protocol.log'}"
+            )
         self.client.save_host_keys(str(known))
 
     def run(self, command: str, timeout: int = 1800, emit=None) -> tuple[int, str]:
