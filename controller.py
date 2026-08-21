@@ -11,6 +11,8 @@ import re
 import secrets
 import shlex
 import socket
+import tarfile
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -29,6 +31,7 @@ ROOT = Path(__file__).resolve().parent
 STATE_DIR = Path.home() / ".bbb-control-plane"
 PROFILE_FILE = STATE_DIR / "profile.json"
 KEYRING_SERVICE = "bbb-control-plane"
+APP_VERSION = "1.3.0"
 HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
 
 
@@ -103,28 +106,64 @@ class SSH:
             output = stdout.read().decode(errors="replace") + stderr.read().decode(errors="replace")
             return stdout.channel.recv_exit_status(), output
         channel = stdout.channel
+        started = time.monotonic()
+        heartbeat = started
         while not channel.exit_status_ready() or channel.recv_ready() or channel.recv_stderr_ready():
+            now = time.monotonic()
+            if now - started > timeout:
+                channel.close()
+                raise ControllerError(f"Remote operation exceeded its {timeout}-second safety limit")
             if channel.recv_ready():
                 emit(channel.recv(4096).decode(errors="replace"))
             if channel.recv_stderr_ready():
                 emit(channel.recv_stderr(4096).decode(errors="replace"))
+            if now - heartbeat >= 15:
+                emit(f"[controller] connection active, waiting for server output ({int(now-started)}s)\n")
+                heartbeat = now
             time.sleep(0.08)
         return channel.recv_exit_status(), ""
 
-    def put_tree(self, local: Path, remote: str) -> None:
-        sftp = self.client.open_sftp()
-        self.run(f"sudo install -d -m 0755 {shlex.quote(remote)}")
-        for path in local.rglob("*"):
-            if not path.is_file() or ".git" in path.parts:
-                continue
-            rel = path.relative_to(local).as_posix()
-            target = f"{remote}/{rel}"
-            parent = target.rsplit("/", 1)[0]
-            self.run(f"sudo install -d -m 0755 {shlex.quote(parent)}")
-            temp = f"/tmp/bcp-{os.getpid()}-{path.name}"
-            sftp.put(str(path), temp)
-            self.run(f"sudo install -m 0644 {shlex.quote(temp)} {shlex.quote(target)} && rm -f {shlex.quote(temp)}")
-        sftp.close()
+    def put_release(self, local: Path, emit) -> None:
+        excluded = {".git", ".venv", "dist", "build", "__pycache__"}
+        with tempfile.NamedTemporaryFile(prefix="bcp-release-", suffix=".tar.gz", delete=False) as temporary:
+            archive_path = Path(temporary.name)
+        try:
+            emit("[controller] packaging release files\n")
+            with tarfile.open(archive_path, "w:gz") as archive:
+                for path in local.rglob("*"):
+                    relative = path.relative_to(local)
+                    if not path.is_file() or excluded.intersection(relative.parts) or path.suffix in {".pyc", ".zip"}:
+                        continue
+                    archive.add(path, arcname=relative.as_posix(), recursive=False)
+            size = archive_path.stat().st_size
+            remote_archive = f"/tmp/bcp-release-{int(time.time())}.tar.gz"
+            sftp = self.client.open_sftp()
+            last_percent = -1
+            def progress(transferred, total):
+                nonlocal last_percent
+                percent = int(transferred * 100 / max(total, 1))
+                if percent == 100 or percent >= last_percent + 10:
+                    emit(f"[controller] upload progress: {percent}% ({transferred}/{total} bytes)\n")
+                    last_percent = percent
+            emit(f"[controller] uploading one release archive ({size} bytes)\n")
+            sftp.put(str(archive_path), remote_archive, callback=progress)
+            sftp.close()
+            release_id = str(time.time_ns())
+            release = f"/opt/bbb-control-plane/releases/{release_id}"
+            legacy = f"/opt/bbb-control-plane/releases/legacy-{release_id}"
+            command = (
+                f"sudo install -d -m 0755 {shlex.quote(release)} && "
+                f"sudo tar -xzf {shlex.quote(remote_archive)} -C {shlex.quote(release)} && "
+                f"if [ -e /opt/bbb-control-plane/source ] && [ ! -L /opt/bbb-control-plane/source ]; then sudo mv /opt/bbb-control-plane/source {shlex.quote(legacy)}; fi && "
+                f"sudo ln -sfnT {shlex.quote(release)} /opt/bbb-control-plane/source && "
+                f"rm -f {shlex.quote(remote_archive)}"
+            )
+            code, output = self.run(command, timeout=300)
+            if code:
+                raise ControllerError(f"Release extraction failed: {output}")
+            emit("[controller] release installed on server\n")
+        finally:
+            archive_path.unlink(missing_ok=True)
 
     def close(self) -> None:
         self.client.close()
@@ -133,7 +172,7 @@ class SSH:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Media Node Controller")
+        self.title(f"Media Node Controller {APP_VERSION}")
         self.geometry("1020x820")
         self.minsize(900, 700)
         self._load_font()
@@ -172,7 +211,7 @@ class App(tk.Tk):
     def _build(self):
         box = ttk.Frame(self, padding=16)
         box.pack(fill="both", expand=True)
-        ttk.Label(box, text="MEDIA NODE CONTROL PLANE", style="Title.TLabel").pack(anchor="w", pady=(0, 8))
+        ttk.Label(box, text=f"MEDIA NODE CONTROL PLANE  v{APP_VERSION}", style="Title.TLabel").pack(anchor="w", pady=(0, 8))
         self.tabs = ttk.Notebook(box)
         self.tabs.pack(fill="both", expand=True)
         setup = ttk.Frame(self.tabs, padding=14)
@@ -210,7 +249,8 @@ class App(tk.Tk):
         ttk.Label(manage, text="SERVER OPERATIONS", style="Title.TLabel").grid(row=2, column=0, columnspan=4, sticky="w", pady=(18, 8))
         management = (("HEALTH", "health"), ("REPAIR", "repair"), ("RESTART BBB", "restart"),
                       ("START BBB", "start"), ("STOP BBB", "stop"), ("RECORDING QUEUE", "queue"),
-                      ("SERVICE LOGS", "logs"), ("ACTIVATE TELEGRAM", "telegram-migrate"))
+                      ("SERVICE LOGS", "logs"), ("INSTALL STATUS", "provision-status"),
+                      ("ACTIVATE TELEGRAM", "telegram-migrate"))
         for index, (text, action) in enumerate(management):
             button = ttk.Button(manage, text=text, command=lambda a=action: self._confirm_action(a))
             button.grid(row=3 + index // 3, column=index % 3, padx=5, pady=5, sticky="ew")
@@ -382,12 +422,13 @@ class App(tk.Tk):
                     code = stdout.channel.recv_exit_status()
                 elif action == "provision":
                     payload, private_file = self._environment(v)
-                    ssh.put_tree(ROOT, "/opt/bbb-control-plane/source")
+                    ssh.put_release(ROOT, self.events.put)
                     sftp = ssh.client.open_sftp()
                     with sftp.file("/tmp/bcp.env", "w") as remote_env:
                         remote_env.write(payload)
                     sftp.close()
-                    code, out = ssh.run("sudo install -m 0600 /tmp/bcp.env /etc/bbb-control-plane.env && rm -f /tmp/bcp.env && sudo bash /opt/bbb-control-plane/source/provision/install.sh", emit=self.events.put)
+                    command = "sudo install -m 0600 /tmp/bcp.env /etc/bbb-control-plane.env && rm -f /tmp/bcp.env && sudo bash /opt/bbb-control-plane/source/provision/launch.sh"
+                    code, out = ssh.run(command, timeout=30000, emit=self.events.put)
                     self.events.put(f"Private recovery settings saved at {private_file}\n")
                 else:
                     code, out = ssh.run(f"sudo /usr/local/sbin/bcpctl {shlex.quote(action)}", emit=self.events.put)
@@ -409,6 +450,9 @@ class App(tk.Tk):
                 self.progress.stop(); self.status.set("READY")
                 for button in self.action_buttons: button.configure(state="normal")
                 continue
+            if isinstance(msg, str) and "[bcp] PHASE:" in msg:
+                phase_name = msg.rsplit("[bcp] PHASE:", 1)[1].splitlines()[0].strip()
+                self.status.set(phase_name.upper()[:28])
             self.log.configure(state="normal"); self.log.insert("end", str(msg)); self.log.see("end"); self.log.configure(state="disabled")
         self.after(100, self._drain)
 

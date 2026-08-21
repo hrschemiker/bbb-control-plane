@@ -23,7 +23,9 @@ Local deletion is permitted only after the queue receipt is in `done` and the lo
 
 ## Idempotency
 
-- Provisioning uses stable paths and systemd unit names.
+- Provisioning uses immutable release directories, a stable source symlink, a server-side systemd unit, and a single-process lock.
+- Interrupted package installation is repaired before the upstream installer resumes.
+- A healthy matching core skips reinstallation while later additive stages remain idempotent.
 - Queue identity is the immutable BBB recording identifier.
 - WordPress enforces a unique key on `record_id`.
 - Callback retries update the same transport row.
