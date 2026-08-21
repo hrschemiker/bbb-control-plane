@@ -9,7 +9,8 @@ case "${1:-}" in
     ;;
   repair)
     bbb-conf --check
-    systemctl restart bbb-rap-resque-worker bcp-worker telegram-bot-api
+    systemctl restart bbb-rap-resque-worker telegram-bot-api
+    if [ -f /var/lib/bcp/telegram-local.ready ]; then systemctl restart bcp-worker; fi
     bbb-conf --restart
     ;;
   restart) bbb-conf --restart ;;
@@ -19,5 +20,10 @@ case "${1:-}" in
   logs)
     journalctl --no-pager -n 250 -u bcp-worker -u telegram-bot-api -u bbb-rap-resque-worker
     ;;
-  *) echo "usage: bcpctl {health|repair|restart|start|stop|queue|logs}" >&2; exit 2 ;;
+  telegram-migrate)
+    set -a; . /etc/bbb-control-plane.env; set +a
+    /usr/bin/env python3 /usr/local/lib/bcp-telegram-migrate.py
+    systemctl enable --now bcp-worker
+    ;;
+  *) echo "usage: bcpctl {health|repair|restart|start|stop|queue|logs|telegram-migrate}" >&2; exit 2 ;;
 esac

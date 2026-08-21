@@ -2,7 +2,7 @@
 /*
 Plugin Name: GTBP Recording Transport Bridge
 Description: Signed recording callbacks and Telegram object reference delivery.
-Version: 1.0.0
+Version: 1.1.0
 Author: Hamidreza Saadati
 */
 if (!defined('ABSPATH')) exit;
@@ -10,6 +10,7 @@ if (!defined('ABSPATH')) exit;
 final class GTBP_Recording_Transport_Bridge {
     const DB_VERSION = '1';
     const OPTION_SECRET = 'gtbp_bridge_shared_secret';
+    const OPTION_GATEWAY = 'gtbp_bridge_gateway_url';
     private static $instance;
 
     public static function instance() { return self::$instance ?: (self::$instance = new self()); }
@@ -18,6 +19,7 @@ final class GTBP_Recording_Transport_Bridge {
         add_action('rest_api_init', [$this, 'routes']);
         add_action('admin_menu', [$this, 'menu']);
         add_filter('gtbp_bot_videos_handled', [$this, 'bot_videos'], 10, 6);
+        add_filter('pre_http_request', [$this, 'telegram_transport'], 10, 3);
     }
     private function table() { global $wpdb; return $wpdb->prefix . 'gtbp_recording_transport'; }
     public function activate() {
@@ -46,7 +48,30 @@ final class GTBP_Recording_Transport_Bridge {
     }
     public function routes() {
         register_rest_route('gtbp-bridge/v1', '/recording-ready', ['methods'=>'POST','callback'=>[$this,'receive'],'permission_callback'=>'__return_true']);
-        register_rest_route('gtbp-bridge/v1', '/health', ['methods'=>'GET','callback'=>function(){return ['ok'=>true,'version'=>'1.0.0'];},'permission_callback'=>'__return_true']);
+        register_rest_route('gtbp-bridge/v1', '/health', ['methods'=>'GET','callback'=>[$this,'health'],'permission_callback'=>'__return_true']);
+    }
+    public function health(WP_REST_Request $request) {
+        $secret=(string)get_option(self::OPTION_SECRET,'');
+        $gateway=(string)get_option(self::OPTION_GATEWAY,'');
+        $ts=(string)$request->get_header('x-bcp-timestamp');
+        $sig=(string)$request->get_header('x-bcp-signature');
+        $authenticated=strlen($secret)>=32 && ctype_digit($ts) && abs(time()-intval($ts))<=300 && hash_equals(hash_hmac('sha256',$ts.'.bridge-ready',$secret),$sig);
+        return ['ok'=>true,'version'=>'1.1.0','gateway_configured'=>(bool)preg_match('#^https://[^/]+/telegram-api/?$#',$gateway),'authenticated'=>$authenticated];
+    }
+    public function telegram_transport($preempt, $args, $url) {
+        static $forwarding=false;
+        if ($forwarding || !is_string($url) || !preg_match('#^https://api\.telegram\.org/(bot|file/bot)#',$url)) return $preempt;
+        $gateway=rtrim((string)get_option(self::OPTION_GATEWAY,''),'/');
+        $secret=(string)get_option(self::OPTION_SECRET,'');
+        if (!preg_match('#^https://[^/]+/telegram-api$#',$gateway) || strlen($secret)<32) return $preempt;
+        $path=(string)wp_parse_url($url,PHP_URL_PATH);
+        $query=(string)wp_parse_url($url,PHP_URL_QUERY);
+        $target=$gateway.$path.($query!==''?'?'.$query:'');
+        $args['headers']=isset($args['headers']) && is_array($args['headers'])?$args['headers']:[];
+        $args['headers']['X-BCP-Gateway-Secret']=$secret;
+        $forwarding=true;
+        try { return wp_remote_request($target,$args); }
+        finally { $forwarding=false; }
     }
     private function authorized(WP_REST_Request $request) {
         $secret = (string)get_option(self::OPTION_SECRET, '');
@@ -93,9 +118,14 @@ final class GTBP_Recording_Transport_Bridge {
     public function menu(){ add_management_page('Recording Transport','Recording Transport','manage_options','gtbp-recording-transport',[$this,'page']); }
     public function page(){
         if (!current_user_can('manage_options')) return;
-        if (isset($_POST['save']) && check_admin_referer('gtbp_bridge_save')) update_option(self::OPTION_SECRET,sanitize_text_field(wp_unslash($_POST['secret']??'')),false);
+        if (isset($_POST['save']) && check_admin_referer('gtbp_bridge_save')) {
+            $secret=sanitize_text_field(wp_unslash($_POST['secret']??''));
+            if ($secret!=='') update_option(self::OPTION_SECRET,$secret,false);
+            update_option(self::OPTION_GATEWAY,esc_url_raw(rtrim(wp_unslash($_POST['gateway']??''),'/')),false);
+        }
         global $wpdb; $rows=$wpdb->get_results("SELECT * FROM {$this->table()} ORDER BY id DESC LIMIT 100");
         echo '<div class="wrap"><h1>Recording Transport</h1><form method="post">'; wp_nonce_field('gtbp_bridge_save');
+        echo '<p><label>Gateway URL <input type="url" name="gateway" value="'.esc_attr(get_option(self::OPTION_GATEWAY,'')).'" size="70" placeholder="https://media.example.com/telegram-api"></label></p>';
         echo '<p><label>Shared secret <input type="password" name="secret" value="" size="70" autocomplete="new-password"></label> <button class="button button-primary" name="save">Save</button></p></form>';
         echo '<table class="widefat striped"><thead><tr><th>Record</th><th>Booking</th><th>Size</th><th>Status</th><th>Updated</th></tr></thead><tbody>';
         foreach($rows as $r) echo '<tr><td>'.esc_html($r->record_id).'</td><td>'.intval($r->booking_id).'</td><td>'.size_format($r->file_size).'</td><td>'.esc_html($r->status).'</td><td>'.esc_html($r->updated_at).'</td></tr>';

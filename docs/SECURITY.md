@@ -4,6 +4,7 @@
 
 - Keep `/etc/bbb-control-plane.env` mode `0600`.
 - Keep Local Bot API bound to `127.0.0.1`.
+- Expose Telegram methods only through the TLS gateway and its high-entropy request header.
 - Do not store credentials in WordPress logs.
 - Rotate the bridge secret on suspected disclosure.
 - Rotate the bot token through the official bot-management interface on suspected disclosure.

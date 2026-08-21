@@ -56,6 +56,8 @@ log "installing local Telegram Bot API"
 install -d -m 0750 /opt/telegram-bot-api /var/lib/telegram-bot-api
 docker pull aiogram/telegram-bot-api:latest
 envsubst < /opt/bbb-control-plane/source/provision/telegram-bot-api.service.in > /etc/systemd/system/telegram-bot-api.service
+install -m 0755 /opt/bbb-control-plane/source/provision/telegram-migrate.py /usr/local/lib/bcp-telegram-migrate.py
+envsubst < /opt/bbb-control-plane/source/provision/telegram-gateway.nginx.in > /etc/bigbluebutton/nginx/telegram-gateway.nginx
 
 log "installing recording queue worker"
 install -d -o bigbluebutton -g bigbluebutton -m 0750 /var/lib/bcp/jobs /var/lib/bcp/done /var/lib/bcp/failed
@@ -74,7 +76,16 @@ ufw allow 443/tcp
 ufw allow 16384:32768/udp
 ufw --force enable
 systemctl daemon-reload
-systemctl enable --now fail2ban telegram-bot-api bcp-worker bcp-retention.timer
+systemctl enable --now fail2ban telegram-bot-api bcp-retention.timer
+systemctl enable bcp-worker
+nginx -t
+systemctl reload nginx
+if /usr/bin/env python3 /usr/local/lib/bcp-telegram-migrate.py; then
+  systemctl enable --now bcp-worker
+else
+  log "Telegram migration is pending. BigBlueButton is installed, existing bot traffic remains on the cloud API, and the recording worker is stopped."
+  log "Configure and activate the WordPress transport bridge, then run: sudo bcpctl telegram-migrate"
+fi
 systemctl restart bbb-rap-resque-worker.service
 bbb-conf --restart
 bbb-conf --check

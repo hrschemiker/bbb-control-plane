@@ -40,8 +40,12 @@ flowchart TD
 3. Install Python 3.11 or later on the administration workstation.
 4. Run `python controller.py` and enter the connection, WordPress, and Telegram values.
 5. Select **Preflight**.
-6. Run **Provision** only after every mandatory check passes.
-7. Install the generated WordPress bridge ZIP from the WordPress Plugins screen.
+6. Run **Provision** after every mandatory check passes.
+7. Install and activate the generated WordPress bridge ZIP.
+8. Select **Copy Bridge Config** and save both values under Tools, Recording Transport.
+9. Select **Activate Telegram** in the Management tab.
+
+Provisioning deliberately leaves the existing bot on the cloud API until the authenticated WordPress bridge is ready. The final activation preserves the current webhook, logs the bot out of the cloud Bot API, attaches it to the loopback-only Bot API, restores the webhook, verifies the new transport, and only then starts the recording worker.
 
 Secrets are never committed. The controller generates the bridge secret, transmits the node configuration through SSH with mode `0600`, removes staging material after installation, and stores a private local recovery copy outside the source tree.
 
