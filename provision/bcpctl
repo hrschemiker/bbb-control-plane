@@ -65,9 +65,9 @@ case "${1:-}" in
   repair)
     bbb-conf --check
     systemctl restart bbb-rap-resque-worker
-    repair_telegram_api
     bbb-conf --restart
     repair_webrtc_sfu
+    repair_telegram_api
     guard_recording_worker
     ;;
   restart) bbb-conf --restart ;;

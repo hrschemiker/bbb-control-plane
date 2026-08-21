@@ -66,6 +66,16 @@ class ProvisioningSafetyTests(unittest.TestCase):
         for variable in ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_WORK_DIR", "TELEGRAM_TEMP_DIR"):
             self.assertIn(f"-e {variable}=", service)
 
+    def test_sfu_repair_precedes_telegram_repair(self):
+        control = (ROOT / "provision" / "bcpctl").read_text(encoding="utf-8")
+        repair_case = control.split("repair)", 1)[1].split(";;", 1)[0]
+        self.assertLess(repair_case.index("repair_webrtc_sfu"), repair_case.index("repair_telegram_api"))
+
+    def test_telegram_temp_uses_entrypoint_owned_work_directory(self):
+        service = (ROOT / "provision" / "telegram-bot-api.service.in").read_text(encoding="utf-8")
+        self.assertIn("TELEGRAM_TEMP_DIR=/var/lib/telegram-bot-api ", service)
+        self.assertNotIn("TELEGRAM_TEMP_DIR=/var/lib/telegram-bot-api/temp", service)
+
 
 if __name__ == "__main__":
     unittest.main()
