@@ -10,6 +10,7 @@ import secrets
 import shlex
 import socket
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -42,13 +43,35 @@ def clean_value(name: str, value: str) -> str:
 
 class SSH:
     def __init__(self, host: str, port: int, user: str, key_path: str, password: str):
-        self.client = paramiko.SSHClient()
-        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         known = Path.home() / ".ssh" / "known_hosts"
-        if known.exists():
-            self.client.load_host_keys(str(known))
         known.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.client.connect(host, port=port, username=user, key_filename=key_path or None, password=password or None, timeout=20)
+        last_error: Exception | None = None
+        for attempt in range(1, 4):
+            self.client = paramiko.SSHClient()
+            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            if known.exists():
+                self.client.load_host_keys(str(known))
+            try:
+                self.client.connect(
+                    host,
+                    port=port,
+                    username=user,
+                    key_filename=key_path or None,
+                    password=password or None,
+                    timeout=30,
+                    banner_timeout=120,
+                    auth_timeout=60,
+                    look_for_keys=False,
+                    allow_agent=False,
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+                self.client.close()
+                if attempt < 3:
+                    time.sleep(5)
+        else:
+            raise ControllerError(f"SSH did not become ready after 3 attempts: {last_error}")
         self.client.save_host_keys(str(known))
 
     def run(self, command: str, timeout: int = 1800) -> tuple[int, str]:
