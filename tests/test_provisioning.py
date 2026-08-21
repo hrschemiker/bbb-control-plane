@@ -51,6 +51,21 @@ class ProvisioningSafetyTests(unittest.TestCase):
         self.assertIn('text.replace(secret, "[REDACTED]")', script)
         self.assertIn('admin:create[$GREENLIGHT_ADMIN_NAME,$GREENLIGHT_ADMIN_EMAIL,$GREENLIGHT_ADMIN_PASSWORD]" >/dev/null 2>&1', script)
 
+    def test_upstream_installer_uses_expected_umask(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("umask 022; exec bash /tmp/bbb-install.sh", script)
+
+    def test_sfu_config_permissions_are_repaired_for_service_user(self):
+        control = (ROOT / "provision" / "bcpctl").read_text(encoding="utf-8")
+        self.assertIn("systemctl show -p User --value bbb-webrtc-sfu.service", control)
+        self.assertIn('chgrp -R "$sfu_group" /etc/bigbluebutton/bbb-webrtc-sfu', control)
+        self.assertIn("sleep 8", control)
+
+    def test_telegram_container_receives_required_environment(self):
+        service = (ROOT / "provision" / "telegram-bot-api.service.in").read_text(encoding="utf-8")
+        for variable in ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_WORK_DIR", "TELEGRAM_TEMP_DIR"):
+            self.assertIn(f"-e {variable}=", service)
+
 
 if __name__ == "__main__":
     unittest.main()

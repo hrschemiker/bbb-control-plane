@@ -2,7 +2,18 @@
 set -Eeuo pipefail
 
 repair_webrtc_sfu(){
+  sfu_user=$(systemctl show -p User --value bbb-webrtc-sfu.service)
+  [ -n "$sfu_user" ] || sfu_user=bigbluebutton
+  sfu_group=$(id -gn "$sfu_user")
+  chmod 0755 /etc/bigbluebutton
+  if [ -d /etc/bigbluebutton/bbb-webrtc-sfu ]; then
+    chgrp -R "$sfu_group" /etc/bigbluebutton/bbb-webrtc-sfu
+    find /etc/bigbluebutton/bbb-webrtc-sfu -type d -exec chmod 0750 {} +
+    find /etc/bigbluebutton/bbb-webrtc-sfu -type f -exec chmod 0640 {} +
+  fi
+  systemctl reset-failed bbb-webrtc-sfu.service
   systemctl restart bbb-webrtc-sfu.service || true
+  sleep 8
   systemctl is-active --quiet bbb-webrtc-sfu.service && return 0
   if journalctl --no-pager -u bbb-webrtc-sfu.service -n 120 | grep -Eq '214/SETSCHEDULER|Failed at step SETSCHEDULER|Operation not permitted.*schedul'; then
     echo "Detected unsupported real-time scheduler for bbb-webrtc-sfu, applying the official systemd override"
@@ -10,11 +21,24 @@ repair_webrtc_sfu(){
     printf '%s\n' '[Service]' 'CPUSchedulingPolicy=other' 'Nice=-10' > /etc/systemd/system/bbb-webrtc-sfu.service.d/override.conf
     systemctl daemon-reload
     systemctl restart bbb-webrtc-sfu.service
+    sleep 8
   fi
   if ! systemctl is-active --quiet bbb-webrtc-sfu.service; then
     systemctl --no-pager --full status bbb-webrtc-sfu.service || true
     journalctl --no-pager -u bbb-webrtc-sfu.service -n 160 || true
     echo "bbb-webrtc-sfu is still unavailable" >&2
+    return 1
+  fi
+}
+
+repair_telegram_api(){
+  systemctl reset-failed telegram-bot-api.service
+  systemctl restart telegram-bot-api.service
+  sleep 5
+  if ! systemctl is-active --quiet telegram-bot-api.service; then
+    systemctl --no-pager --full status telegram-bot-api.service || true
+    journalctl --no-pager -u telegram-bot-api.service -n 120 || true
+    echo "telegram-bot-api is unavailable" >&2
     return 1
   fi
 }
@@ -40,7 +64,8 @@ case "${1:-}" in
     ;;
   repair)
     bbb-conf --check
-    systemctl restart bbb-rap-resque-worker telegram-bot-api
+    systemctl restart bbb-rap-resque-worker
+    repair_telegram_api
     bbb-conf --restart
     repair_webrtc_sfu
     guard_recording_worker
