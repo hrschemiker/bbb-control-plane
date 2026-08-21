@@ -19,6 +19,9 @@ flowchart TD
 ## Properties
 
 - Idempotent preflight and provisioning stages
+- Server-managed provisioning that survives controller or SSH disconnection
+- Automatic healthy, partial, and absent installation detection
+- Package repair, protected configuration backup, and bounded final recovery
 - Ubuntu 22.04 and BigBlueButton 3.0 target profile
 - Presentation and composite H.264 recording workflows
 - Local Telegram Bot API transport for objects up to 2000 MB
@@ -40,12 +43,14 @@ flowchart TD
 3. Install Python 3.11 or later on the administration workstation.
 4. Run `python controller.py` and enter the connection, WordPress, and Telegram values.
 5. Select **Preflight**.
-6. Run **Provision** after every mandatory check passes.
+6. Run **Provision** after every mandatory check passes. Re-running it resumes or repairs an earlier incomplete installation.
 7. Install and activate the generated WordPress bridge ZIP.
 8. Select **Copy Bridge Config** and save both values under Tools, Recording Transport.
 9. Select **Activate Telegram** in the Management tab.
 
 Provisioning deliberately leaves the existing bot on the cloud API until the authenticated WordPress bridge is ready. The final activation preserves the current webhook, logs the bot out of the cloud Bot API, attaches it to the loopback-only Bot API, restores the webhook, verifies the new transport, and only then starts the recording worker.
+
+Provisioning runs as a transient systemd service on the node. Closing the controller does not stop it. A later Provision action attaches to an active run. The recovery state machine first keeps a healthy installation, then repairs package state and reruns the idempotent upstream installer. Only after two failed recovery attempts does it back up configuration, purge partial BBB packages, and perform one bounded final installation. It never removes `/var/bigbluebutton` recording storage.
 
 Secrets are never committed. The controller generates the bridge secret, transmits the node configuration through SSH with mode `0600`, removes staging material after installation, and stores a private local recovery copy outside the source tree.
 

@@ -4,11 +4,13 @@
 
 ```bash
 sudo bcpctl health
+sudo bcpctl provision-status
 sudo bcpctl queue
 sudo bbb-record --list-recent
 sudo bbb-record --watch
 sudo journalctl -u bcp-worker -n 200 --no-pager
 sudo journalctl -u telegram-bot-api -n 200 --no-pager
+sudo journalctl -u bcp-provision -n 200 --no-pager
 ```
 
 ## Update procedure

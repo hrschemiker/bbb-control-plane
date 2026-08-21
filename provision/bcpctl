@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 case "${1:-}" in
   health)
+    echo "provision-state: $(cat /var/lib/bcp/provision/state 2>/dev/null || echo unknown)"
+    systemctl --no-pager status bcp-provision.service 2>/dev/null || true
     bbb-conf --check
     systemctl --no-pager --failed
     systemctl is-active bbb-rap-resque-worker bcp-worker telegram-bot-api
@@ -18,12 +20,18 @@ case "${1:-}" in
   stop) bbb-conf --stop ;;
   queue) find /var/lib/bcp/jobs -maxdepth 1 -type f -printf '%f\n' ;;
   logs)
-    journalctl --no-pager -n 250 -u bcp-worker -u telegram-bot-api -u bbb-rap-resque-worker
+    journalctl --no-pager -n 250 -u bcp-provision -u bcp-worker -u telegram-bot-api -u bbb-rap-resque-worker
+    ;;
+  provision-status)
+    echo "state: $(cat /var/lib/bcp/provision/state 2>/dev/null || echo unknown)"
+    systemctl --no-pager status bcp-provision.service 2>/dev/null || true
+    tail -n 120 /var/log/bcp-provision.log 2>/dev/null || true
+    dpkg --audit
     ;;
   telegram-migrate)
     set -a; . /etc/bbb-control-plane.env; set +a
     /usr/bin/env python3 /usr/local/lib/bcp-telegram-migrate.py
     systemctl enable --now bcp-worker
     ;;
-  *) echo "usage: bcpctl {health|repair|restart|start|stop|queue|logs|telegram-migrate}" >&2; exit 2 ;;
+  *) echo "usage: bcpctl {health|repair|restart|start|stop|queue|logs|provision-status|telegram-migrate}" >&2; exit 2 ;;
 esac
