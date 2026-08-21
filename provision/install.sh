@@ -223,7 +223,7 @@ if [ -f /usr/local/bigbluebutton/core/scripts/video.yml ]; then
 fi
 
 phase installing_telegram_transport
-install -d -m 0750 /opt/telegram-bot-api /var/lib/telegram-bot-api /var/lib/telegram-bot-api/temp
+install -d -m 0750 /opt/telegram-bot-api /var/lib/telegram-bot-api
 docker pull aiogram/telegram-bot-api:latest
 envsubst '${TELEGRAM_API_ID} ${TELEGRAM_API_HASH}' < /opt/bbb-control-plane/source/provision/telegram-bot-api.service.in > /etc/systemd/system/telegram-bot-api.service
 install -m 0755 /opt/bbb-control-plane/source/provision/telegram-migrate.py /usr/local/lib/bcp-telegram-migrate.py
