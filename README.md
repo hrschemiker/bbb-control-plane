@@ -1,5 +1,7 @@
 # Deterministic Media Control Plane
 
+Current release: `1.3.1`
+
 [![CI](https://github.com/hrschemiker/bbb-control-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/hrschemiker/bbb-control-plane/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-0f766e.svg)](LICENSE)
 
@@ -35,6 +37,8 @@ flowchart TD
 - Persistent workstation profile with operating-system credential storage
 - Progress indication, copyable logs, and exportable diagnostic reports
 - Start, stop, restart, repair, queue, and service-log controls
+- Greenlight database repair before administrator provisioning
+- Required-service diagnostics in the copyable operation log
 
 ## Quick start
 

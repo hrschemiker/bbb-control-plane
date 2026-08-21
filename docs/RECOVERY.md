@@ -23,6 +23,8 @@ The recovery order is fixed:
 
 The cleanup stage does not remove `/var/bigbluebutton`, WordPress data, recording queues, Telegram state, or the local private environment file.
 
+Greenlight recovery prepares and verifies its database before administrator creation. Generated Nginx configuration preserves request-time variables and is syntax checked before reload. If a required service cannot start, its status and recent journal entries are included in the operation log.
+
 Restore the provider snapshot or provision a clean Ubuntu 22.04 node, then restore:
 
 - `/etc/bigbluebutton`
