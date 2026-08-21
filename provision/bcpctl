@@ -1,6 +1,33 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+repair_html5_config(){
+  chmod 0755 /etc/bigbluebutton
+  for config_file in \
+    /etc/bigbluebutton/bbb-html5.yml \
+    /etc/bigbluebutton/bbb-web.properties; do
+    if [ -f "$config_file" ]; then
+      chown root:root "$config_file"
+      chmod 0644 "$config_file"
+    fi
+  done
+}
+
+verify_html5_auth(){
+  local attempt
+  for attempt in $(seq 1 12); do
+    if curl -sS --max-time 3 http://127.0.0.1:8901/userInfo >/dev/null; then
+      echo "bbb-html5 authentication endpoint: reachable"
+      return 0
+    fi
+    sleep 5
+  done
+  systemctl --no-pager --full status 'bbb-html5-backend@*.service' bbb-apps-akka.service hasura-graphql-engine.service 2>/dev/null || true
+  journalctl --no-pager -n 180 -u 'bbb-html5-backend@*.service' -u bbb-apps-akka.service -u hasura-graphql-engine.service || true
+  echo "bbb-html5 authentication endpoint is unavailable" >&2
+  return 1
+}
+
 repair_webrtc_sfu(){
   sfu_user=$(systemctl show -p User --value bbb-webrtc-sfu.service)
   [ -n "$sfu_user" ] || sfu_user=bigbluebutton
@@ -65,7 +92,9 @@ case "${1:-}" in
   repair)
     bbb-conf --check
     systemctl restart bbb-rap-resque-worker
+    repair_html5_config
     bbb-conf --restart
+    verify_html5_auth
     repair_webrtc_sfu
     repair_telegram_api
     guard_recording_worker

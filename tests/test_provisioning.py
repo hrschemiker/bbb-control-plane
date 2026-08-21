@@ -61,6 +61,15 @@ class ProvisioningSafetyTests(unittest.TestCase):
         self.assertIn('chgrp -R "$sfu_group" /etc/bigbluebutton/bbb-webrtc-sfu', control)
         self.assertIn("sleep 8", control)
 
+    def test_html5_config_permissions_and_auth_endpoint_are_repaired(self):
+        control = (ROOT / "provision" / "bcpctl").read_text(encoding="utf-8")
+        self.assertIn("repair_html5_config", control)
+        self.assertIn("/etc/bigbluebutton/bbb-html5.yml", control)
+        self.assertIn('chmod 0644 "$config_file"', control)
+        self.assertIn("http://127.0.0.1:8901/userInfo", control)
+        repair_case = control.split("repair)", 1)[1].split(";;", 1)[0]
+        self.assertLess(repair_case.index("repair_html5_config"), repair_case.index("bbb-conf --restart"))
+
     def test_telegram_container_receives_required_environment(self):
         service = (ROOT / "provision" / "telegram-bot-api.service.in").read_text(encoding="utf-8")
         for variable in ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_WORK_DIR", "TELEGRAM_TEMP_DIR"):
