@@ -201,6 +201,7 @@ class App(tk.Tk):
         for text, action in (("PREFLIGHT", "preflight"), ("PROVISION", "provision")):
             button = ttk.Button(actions, text=text, command=lambda a=action: self._start(a))
             button.pack(side="left", padx=(0, 8)); self.action_buttons.append(button)
+        ttk.Button(actions, text="COPY BRIDGE CONFIG", command=self._copy_bridge_config).pack(side="left", padx=(0, 8))
         setup.columnconfigure(1, weight=1)
 
         ttk.Label(manage, text="WEB CONSOLES", style="Title.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
@@ -209,7 +210,7 @@ class App(tk.Tk):
         ttk.Label(manage, text="SERVER OPERATIONS", style="Title.TLabel").grid(row=2, column=0, columnspan=4, sticky="w", pady=(18, 8))
         management = (("HEALTH", "health"), ("REPAIR", "repair"), ("RESTART BBB", "restart"),
                       ("START BBB", "start"), ("STOP BBB", "stop"), ("RECORDING QUEUE", "queue"),
-                      ("SERVICE LOGS", "logs"))
+                      ("SERVICE LOGS", "logs"), ("ACTIVATE TELEGRAM", "telegram-migrate"))
         for index, (text, action) in enumerate(management):
             button = ttk.Button(manage, text=text, command=lambda a=action: self._confirm_action(a))
             button.grid(row=3 + index // 3, column=index % 3, padx=5, pady=5, sticky="ew")
@@ -244,6 +245,24 @@ class App(tk.Tk):
         content = self.log.get("1.0", "end-1c")
         self.clipboard_clear(); self.clipboard_append(content)
         self.status.set("LOG COPIED")
+
+    def _copy_bridge_config(self):
+        try:
+            values = {key: value.get().strip() for key, value in self.values.items()}
+            _payload, private_file = self._environment(values)
+            saved = {}
+            for line in private_file.read_text(encoding="utf-8").splitlines():
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    saved[key] = value
+            content = "Gateway URL: https://{}/telegram-api\nShared secret: {}".format(
+                saved["BBB_HOSTNAME"], saved["BRIDGE_SHARED_SECRET"]
+            )
+            self.clipboard_clear(); self.clipboard_append(content)
+            self.status.set("BRIDGE CONFIG COPIED")
+            messagebox.showinfo("Bridge configuration", "The WordPress bridge settings are copied to the clipboard.")
+        except Exception as exc:
+            messagebox.showerror("Bridge configuration", str(exc))
 
     def _save_log(self):
         target = filedialog.asksaveasfilename(defaultextension=".log", filetypes=[("Log files", "*.log"), ("All files", "*")])

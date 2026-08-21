@@ -47,6 +47,14 @@ def valid_media(path: Path) -> dict:
     return data
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def external_meeting_id(record_id: str) -> str:
     for candidate in (Path("/var/bigbluebutton/published/presentation") / record_id / "metadata.xml", Path("/var/bigbluebutton/recording/publish/presentation") / record_id / "metadata.xml"):
         if candidate.is_file():
@@ -91,7 +99,7 @@ def process(job_path: Path) -> None:
     if not video:
         raise RuntimeError("composite recording is not published yet")
     probe = valid_media(video)
-    digest = hashlib.sha256(video.read_bytes()).hexdigest()
+    digest = sha256_file(video)
     sent = telegram_upload(video, f"recording:{record_id}")
     payload = {"record_id": record_id, "meeting_id": external_meeting_id(record_id), "video_url": f"https://{env('BBB_HOSTNAME')}/video/{record_id}/{video.name}", "sha256": digest, "duration": probe["format"]["duration"], **sent}
     callback(payload)

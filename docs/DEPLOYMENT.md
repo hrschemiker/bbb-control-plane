@@ -38,8 +38,7 @@ Do not expose ports 8081, 9090, 3000, PostgreSQL, Redis, or Docker sockets publi
 3. Add the node host key to the workstation `known_hosts` file.
 4. Obtain Telegram `api_id` and `api_hash` from the Telegram developer portal.
 5. Create a private archive channel and grant the bot permission to post.
-6. Generate the bridge secret with `openssl rand -hex 32`.
-7. Keep the Telegram bot token, API hash, and server password available locally.
+6. Keep the Telegram bot token, API hash, and server password available locally.
 
 Never paste private keys, bot tokens, API hashes, shared secrets, or root passwords into issues, commits, screenshots, or chat messages.
 
@@ -54,11 +53,14 @@ The controller generates `BRIDGE_SHARED_SECRET` automatically. It builds the pri
 5. Select `Provision`.
 6. Keep the generated recovery file from the path reported by the controller.
 7. Open Greenlight and its administrator panel from the Management tab.
-8. Install the bridge ZIP in WordPress.
-9. Copy the same bridge secret into Tools, Recording Transport.
-10. Apply the minimal compatibility patch to the booking plugin.
-11. Run a short meeting with presentation, screen share, audio, and webcam.
-12. End the meeting and observe the recording queue from the Management tab.
+8. Install and activate the bridge ZIP in WordPress.
+9. Select `Copy Bridge Config` in the controller and save the gateway URL and shared secret under Tools, Recording Transport.
+10. Apply the minimal compatibility patch to the booking plugin if that hook is not already present.
+11. Select `Activate Telegram` in the Management tab.
+12. Run a short meeting with presentation, screen share, audio, and webcam.
+13. End the meeting and observe the recording queue from the Management tab.
+
+The bot remains registered with the Telegram cloud Bot API until step 11. A failed bridge readiness check does not call `logOut` and does not interrupt the existing bot. The activation stage captures the current webhook, performs the required cloud logout, validates the local API, and restores the webhook before enabling the recording worker.
 
 ## Non-destructive application upgrade
 

@@ -18,5 +18,12 @@ class WorkerTests(unittest.TestCase):
         secret=b'x'*32; ts=b'1'; body=b'{}'
         self.assertEqual(len(hmac.new(secret, ts+b'.'+body, hashlib.sha256).hexdigest()), 64)
 
+    def test_sha256_file_is_streamed_and_correct(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "recording.mp4"
+            path.write_bytes((b"recording-block" * 100000) + b"tail")
+            self.assertEqual(worker.sha256_file(path), hashlib.sha256(path.read_bytes()).hexdigest())
+
 
 if __name__ == '__main__': unittest.main()
