@@ -280,6 +280,8 @@ install -d -o bigbluebutton -g bigbluebutton -m 0750 /var/lib/bcp/jobs /var/lib/
 install -m 0755 /opt/bbb-control-plane/source/worker/worker.py /usr/local/lib/bcp-worker.py
 install -m 0755 /opt/bbb-control-plane/source/worker/post_publish.py /usr/local/lib/bcp-post-publish.py
 install -m 0755 /opt/bbb-control-plane/source/provision/bcpctl /usr/local/sbin/bcpctl
+install -m 0755 /opt/bbb-control-plane/source/provision/fix-public-url.sh /usr/local/sbin/bcp-fix-public-url
+install -m 0755 /opt/bbb-control-plane/source/provision/verify-join-url.py /usr/local/lib/bcp-verify-join-url.py
 install -m 0644 /opt/bbb-control-plane/source/provision/bcp-worker.service /etc/systemd/system/bcp-worker.service
 install -m 0644 /opt/bbb-control-plane/source/provision/bcp-retention.service /etc/systemd/system/bcp-retention.service
 install -m 0644 /opt/bbb-control-plane/source/provision/bcp-retention.timer /etc/systemd/system/bcp-retention.timer
@@ -312,10 +314,20 @@ fi
 phase final_validation
 systemctl restart bbb-rap-resque-worker.service
 bbb-conf --setip "$BBB_HOSTNAME"
+apply_hook=/etc/bigbluebutton/bbb-conf/apply-config.sh
+touch "$apply_hook"
+if ! grep -Fq '/usr/local/sbin/bcp-fix-public-url' "$apply_hook"; then
+  printf '\n%s\n' '/usr/local/sbin/bcp-fix-public-url' >> "$apply_hook"
+fi
+chmod 0755 "$apply_hook"
+/usr/local/sbin/bcp-fix-public-url
 bbb-conf --restart
 /usr/local/sbin/bcpctl repair
 nginx -t
 curl -fsS --max-time 20 "https://$BBB_HOSTNAME/bigbluebutton/api" | grep -q '<returncode>SUCCESS</returncode>'
+bbb_secret=$(bbb-conf --secret | awk '/Secret:/{print $2; exit}')
+[ -n "$bbb_secret" ] || die "BigBlueButton API secret could not be read for join validation"
+python3 /usr/local/lib/bcp-verify-join-url.py "https://$BBB_HOSTNAME" "$bbb_secret"
 bbb-conf --check
 bbb-record --check
 curl -fkIsS --max-time 20 "https://$BBB_HOSTNAME/" >/dev/null

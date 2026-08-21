@@ -22,7 +22,7 @@ plugin_target = dist / "gtbp-recording-bridge-1.1.0.zip"
 plugin_files = [(path, path.relative_to(plugin.parent).as_posix()) for path in plugin.rglob("*") if path.is_file()]
 write_archive(plugin_target, plugin_files)
 
-source_target = dist / "bbb-control-plane-source-1.3.5.zip"
+source_target = dist / "bbb-control-plane-source-1.3.6.zip"
 excluded_parts = {".git", "dist", "__pycache__"}
 source_files = [
     (path, path.relative_to(root).as_posix())

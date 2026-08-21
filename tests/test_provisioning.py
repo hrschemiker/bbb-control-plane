@@ -87,6 +87,20 @@ class ProvisioningSafetyTests(unittest.TestCase):
         script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
         self.assertIn('cp -a "$greenlight_env" "$greenlight_env.bcp-backup-', script)
 
+    def test_effective_bbb_web_url_is_persistently_repaired(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        fixer = (ROOT / "provision" / "fix-public-url.sh").read_text(encoding="utf-8")
+        self.assertIn("/usr/share/bbb-web/WEB-INF/classes/bigbluebutton.properties", fixer)
+        self.assertIn("/usr/local/sbin/bcp-fix-public-url", script)
+        self.assertIn("apply-config.sh", script)
+
+    def test_real_join_redirect_is_validated(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        validator = (ROOT / "provision" / "verify-join-url.py").read_text(encoding="utf-8")
+        self.assertIn("bcp-verify-join-url.py", script)
+        self.assertIn('expected = f"{base}/html5client"', validator)
+        self.assertIn("join redirect uses an unexpected origin", validator)
+
 
 if __name__ == "__main__":
     unittest.main()
