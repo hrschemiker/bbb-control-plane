@@ -76,6 +76,17 @@ class ProvisioningSafetyTests(unittest.TestCase):
         self.assertIn("TELEGRAM_TEMP_DIR=/var/lib/telegram-bot-api ", service)
         self.assertNotIn("TELEGRAM_TEMP_DIR=/var/lib/telegram-bot-api/temp", service)
 
+    def test_greenlight_endpoint_uses_media_hostname_and_is_verified(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn('expected_endpoint="https://$BBB_HOSTNAME/bigbluebutton/"', script)
+        self.assertIn("docker compose up -d --force-recreate", script)
+        self.assertIn("Greenlight endpoint verified for the media hostname", script)
+        self.assertIn('https://$BBB_HOSTNAME/bigbluebutton/api', script)
+
+    def test_greenlight_environment_is_backed_up_before_change(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn('cp -a "$greenlight_env" "$greenlight_env.bcp-backup-', script)
+
 
 if __name__ == "__main__":
     unittest.main()

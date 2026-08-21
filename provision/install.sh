@@ -125,6 +125,50 @@ prepare_greenlight_database(){
   die "Greenlight database could not be prepared"
 }
 
+configure_greenlight_endpoint(){
+  phase configuring_greenlight_endpoint
+  greenlight_dir=/root/greenlight-v3
+  greenlight_env=$greenlight_dir/.env
+  [ -f "$greenlight_env" ] || die "Greenlight environment file is missing"
+  expected_endpoint="https://$BBB_HOSTNAME/bigbluebutton/"
+  current_endpoint=$(awk -F= '$1=="BIGBLUEBUTTON_ENDPOINT"{sub(/^[^=]*=/,""); print; exit}' "$greenlight_env")
+  if [ "$current_endpoint" != "$expected_endpoint" ]; then
+    cp -a "$greenlight_env" "$greenlight_env.bcp-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+    python3 - "$greenlight_env" "$expected_endpoint" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+expected = sys.argv[2]
+lines = path.read_text(encoding="utf-8").splitlines()
+updated = []
+found = False
+for line in lines:
+    if line.startswith("BIGBLUEBUTTON_ENDPOINT="):
+        updated.append(f"BIGBLUEBUTTON_ENDPOINT={expected}")
+        found = True
+    else:
+        updated.append(line)
+if not found:
+    updated.append(f"BIGBLUEBUTTON_ENDPOINT={expected}")
+path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+PY
+    (cd "$greenlight_dir" && docker compose up -d --force-recreate)
+  fi
+  attempt=1
+  while [ "$attempt" -le 12 ]; do
+    container_endpoint=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' greenlight-v3 2>/dev/null | awk -F= '$1=="BIGBLUEBUTTON_ENDPOINT"{sub(/^[^=]*=/,""); print; exit}')
+    if [ "$container_endpoint" = "$expected_endpoint" ] && greenlight_database_ready; then
+      log "Greenlight endpoint verified for the media hostname"
+      return 0
+    fi
+    sleep 5
+    attempt=$((attempt+1))
+  done
+  docker logs --tail 120 greenlight-v3 2>&1 || true
+  die "Greenlight did not adopt the configured BigBlueButton endpoint"
+}
+
 create_or_promote_greenlight_admin(){
   if docker exec greenlight-v3 bundle exec rake "admin:create[$GREENLIGHT_ADMIN_NAME,$GREENLIGHT_ADMIN_EMAIL,$GREENLIGHT_ADMIN_PASSWORD]" >/dev/null 2>&1; then
     log "Greenlight administrator created"
@@ -212,6 +256,7 @@ install_or_resume_bbb
 phase configuring_greenlight
 greenlight_healthy || die "Greenlight container is not healthy after upstream installation"
 greenlight_database_ready || prepare_greenlight_database
+configure_greenlight_endpoint
 create_or_promote_greenlight_admin
 
 phase configuring_composite_recordings
@@ -270,6 +315,7 @@ bbb-conf --setip "$BBB_HOSTNAME"
 bbb-conf --restart
 /usr/local/sbin/bcpctl repair
 nginx -t
+curl -fsS --max-time 20 "https://$BBB_HOSTNAME/bigbluebutton/api" | grep -q '<returncode>SUCCESS</returncode>'
 bbb-conf --check
 bbb-record --check
 curl -fkIsS --max-time 20 "https://$BBB_HOSTNAME/" >/dev/null
