@@ -59,21 +59,24 @@ class SSH:
         paramiko.util.log_to_file(str(STATE_DIR / "ssh-protocol.log"), level="DEBUG")
         known.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         last_error: Exception | None = None
-        for attempt in range(1, 4):
+        for attempt in range(1, 3):
             self.client = paramiko.SSHClient()
             self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             if known.exists():
                 self.client.load_host_keys(str(known))
             try:
+                connection = socket.create_connection((host, port), timeout=30)
+                connection.settimeout(150)
                 self.client.connect(
                     host,
                     port=port,
                     username=user,
                     key_filename=key_path or None,
                     password=password or None,
-                    timeout=30,
-                    banner_timeout=120,
-                    auth_timeout=60,
+                    sock=connection,
+                    timeout=150,
+                    banner_timeout=150,
+                    auth_timeout=120,
                     look_for_keys=False,
                     allow_agent=False,
                 )
@@ -81,11 +84,15 @@ class SSH:
             except Exception as exc:
                 last_error = exc
                 self.client.close()
-                if attempt < 3:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+                if attempt < 2:
                     time.sleep(5)
         else:
             raise ControllerError(
-                f"SSH did not become ready after 3 attempts: {last_error}. "
+                f"SSH did not become ready after 2 attempts: {last_error}. "
                 f"Protocol log: {STATE_DIR / 'ssh-protocol.log'}"
             )
         self.client.save_host_keys(str(known))
