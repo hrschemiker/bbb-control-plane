@@ -34,12 +34,12 @@ flowchart TD
 1. Create an `A` record for the selected media hostname and point it to the node's public IPv4 address.
 2. Wait until public DNS resolves to that address.
 3. Install Python 3.11 or later on the administration workstation.
-4. Copy `config/example.env` to a private location and complete the values.
-5. Run `python controller.py` and select **Preflight**.
+4. Run `python controller.py` and enter the connection, WordPress, and Telegram values.
+5. Select **Preflight**.
 6. Run **Provision** only after every mandatory check passes.
 7. Install the generated WordPress bridge ZIP from the WordPress Plugins screen.
 
-Secrets are never committed. The controller transmits the generated node configuration through SSH with mode `0600` and removes staging material after installation.
+Secrets are never committed. The controller generates the bridge secret, transmits the node configuration through SSH with mode `0600`, removes staging material after installation, and stores a private local recovery copy outside the source tree.
 
 ## Repository layout
 

@@ -39,18 +39,20 @@ Do not expose ports 8081, 9090, 3000, PostgreSQL, Redis, or Docker sockets publi
 4. Obtain Telegram `api_id` and `api_hash` from the Telegram developer portal.
 5. Create a private archive channel and grant the bot permission to post.
 6. Generate the bridge secret with `openssl rand -hex 32`.
-7. Complete a private copy of `config/example.env`.
+7. Keep the Telegram bot token, API hash, and server password available locally.
 
 Never paste private keys, bot tokens, API hashes, shared secrets, or root passwords into issues, commits, screenshots, or chat messages.
+
+The controller generates `BRIDGE_SHARED_SECRET` automatically. It builds the private environment payload in memory, uploads it with mode `0600`, and stores one local recovery copy under `~/.bbb-control-plane`. Private values are never part of the source tree.
 
 ## Controller workflow
 
 1. Start `controller.py`.
-2. Enter the server IPv4, hostname, certificate email, SSH username, SSH key, and environment file.
+2. Enter the server connection, hostname, WordPress, and Telegram values directly in the controller.
 3. Select `Preflight`.
 4. Correct every failure.
 5. Select `Provision`.
-6. Save the final health report.
+6. Keep the generated recovery file from the path reported by the controller.
 7. Install the bridge ZIP in WordPress.
 8. Copy the same bridge secret into Tools, Recording Transport.
 9. Apply the minimal compatibility patch to the booking plugin.

@@ -6,6 +6,7 @@ import ipaddress
 import os
 import queue
 import re
+import secrets
 import shlex
 import socket
 import threading
@@ -31,6 +32,12 @@ def validate(host: str, hostname: str, email: str, key_path: str, password: str)
         raise ControllerError("Invalid certificate email")
     if not password and not Path(key_path).is_file():
         raise ControllerError("Provide an SSH private key or the temporary server password")
+
+
+def clean_value(name: str, value: str) -> str:
+    if not value or "\n" in value or "\r" in value:
+        raise ControllerError(f"Invalid or missing {name}")
+    return value
 
 
 class SSH:
@@ -72,9 +79,12 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Media Node Controller")
-        self.geometry("880x680")
+        self.geometry("940x780")
         self.events: queue.Queue[str] = queue.Queue()
-        self.values = {k: tk.StringVar() for k in ("host", "port", "user", "key", "password", "hostname", "email", "env")}
+        self.values = {k: tk.StringVar() for k in (
+            "host", "port", "user", "key", "password", "hostname", "email",
+            "wordpress", "bot_token", "api_id", "api_hash", "archive_chat_id",
+        )}
         self.values["port"].set("22")
         self.values["user"].set("root")
         self._build()
@@ -86,21 +96,54 @@ class App(tk.Tk):
         fields = [
             ("Server IPv4", "host"), ("SSH port", "port"), ("SSH user", "user"),
             ("SSH private key, optional", "key"), ("Temporary SSH password, optional", "password"),
-            ("Media hostname", "hostname"), ("Certificate email", "email"), ("Private environment file", "env"),
+            ("Media hostname", "hostname"), ("Certificate email", "email"),
+            ("WordPress URL", "wordpress"), ("Telegram bot token", "bot_token"),
+            ("Telegram API ID", "api_id"), ("Telegram API hash", "api_hash"),
+            ("Telegram archive channel ID", "archive_chat_id"),
         ]
         for row, (label, key) in enumerate(fields):
             ttk.Label(box, text=label).grid(row=row, column=0, sticky="w", pady=5)
-            ttk.Entry(box, textvariable=self.values[key], width=72, show="*" if key == "password" else "").grid(row=row, column=1, sticky="ew", pady=5)
+            hidden = key in {"password", "bot_token", "api_hash"}
+            ttk.Entry(box, textvariable=self.values[key], width=72, show="*" if hidden else "").grid(row=row, column=1, sticky="ew", pady=5)
         ttk.Button(box, text="Select SSH key", command=lambda: self.values["key"].set(filedialog.askopenfilename())).grid(row=3, column=2)
-        ttk.Button(box, text="Select environment", command=lambda: self.values["env"].set(filedialog.askopenfilename())).grid(row=7, column=2)
         actions = ttk.Frame(box)
-        actions.grid(row=8, column=0, columnspan=3, sticky="w", pady=14)
+        actions.grid(row=len(fields), column=0, columnspan=3, sticky="w", pady=14)
         for text, action in (("Preflight", "preflight"), ("Provision", "provision"), ("Health", "health"), ("Repair", "repair")):
             ttk.Button(actions, text=text, command=lambda a=action: self._start(a)).pack(side="left", padx=5)
         self.log = tk.Text(box, height=24, wrap="word", state="disabled")
-        self.log.grid(row=9, column=0, columnspan=3, sticky="nsew")
+        self.log.grid(row=len(fields) + 1, column=0, columnspan=3, sticky="nsew")
         box.columnconfigure(1, weight=1)
-        box.rowconfigure(9, weight=1)
+        box.rowconfigure(len(fields) + 1, weight=1)
+
+    def _environment(self, values: dict[str, str]) -> tuple[str, Path]:
+        wordpress = clean_value("WordPress URL", values["wordpress"]).rstrip("/")
+        if not wordpress.startswith(("https://", "http://")):
+            raise ControllerError("WordPress URL must begin with https://")
+        api_id = clean_value("Telegram API ID", values["api_id"])
+        if not api_id.isdigit():
+            raise ControllerError("Telegram API ID must contain digits only")
+        channel_id = clean_value("Telegram archive channel ID", values["archive_chat_id"])
+        if not channel_id.lstrip("-").isdigit():
+            raise ControllerError("Telegram archive channel ID must be numeric")
+        secret = secrets.token_hex(32)
+        lines = {
+            "BBB_HOSTNAME": values["hostname"], "LETSENCRYPT_EMAIL": values["email"],
+            "WORDPRESS_URL": wordpress, "BRIDGE_SHARED_SECRET": secret,
+            "TELEGRAM_BOT_TOKEN": clean_value("Telegram bot token", values["bot_token"]),
+            "TELEGRAM_API_ID": api_id,
+            "TELEGRAM_API_HASH": clean_value("Telegram API hash", values["api_hash"]),
+            "TELEGRAM_ARCHIVE_CHAT_ID": channel_id, "RAW_RETENTION_DAYS": "7",
+            "PRESENTATION_RETENTION_DAYS": "30", "LOCAL_VIDEO_RETENTION_DAYS": "3",
+            "MIN_FREE_GB": "30", "MAX_UPLOAD_MIB": "1900", "VIDEO_CRF": "23",
+            "VIDEO_HEIGHT": "720",
+        }
+        payload = "\n".join(f"{key}={clean_value(key, value)}" for key, value in lines.items()) + "\n"
+        private_dir = Path.home() / ".bbb-control-plane"
+        private_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        private_file = private_dir / f"{values['hostname']}.env"
+        private_file.write_text(payload, encoding="utf-8")
+        private_file.chmod(0o600)
+        return payload, private_file
 
     def _start(self, action: str):
         threading.Thread(target=self._execute, args=(action,), daemon=True).start()
@@ -122,13 +165,14 @@ class App(tk.Tk):
                     out = stdout.read().decode() + stderr.read().decode()
                     code = stdout.channel.recv_exit_status()
                 elif action == "provision":
-                    if not Path(v["env"]).is_file():
-                        raise ControllerError("Select a completed private environment file")
+                    payload, private_file = self._environment(v)
                     ssh.put_tree(ROOT, "/opt/bbb-control-plane/source")
                     sftp = ssh.client.open_sftp()
-                    sftp.put(v["env"], "/tmp/bcp.env")
+                    with sftp.file("/tmp/bcp.env", "w") as remote_env:
+                        remote_env.write(payload)
                     sftp.close()
                     code, out = ssh.run("sudo install -m 0600 /tmp/bcp.env /etc/bbb-control-plane.env && rm -f /tmp/bcp.env && sudo bash /opt/bbb-control-plane/source/provision/install.sh")
+                    self.events.put(f"Private recovery settings saved at {private_file}\n")
                 else:
                     code, out = ssh.run(f"sudo /usr/local/sbin/bcpctl {shlex.quote(action)}")
                 self.events.put(out)
