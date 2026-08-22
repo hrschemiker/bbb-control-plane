@@ -74,6 +74,20 @@ class ProvisioningSafetyTests(unittest.TestCase):
         service = (ROOT / "provision" / "telegram-bot-api.service.in").read_text(encoding="utf-8")
         for variable in ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_WORK_DIR", "TELEGRAM_TEMP_DIR"):
             self.assertIn(f"-e {variable}=", service)
+        self.assertIn("-v /var/bigbluebutton:/var/bigbluebutton:ro", service)
+
+    def test_video_config_is_validated_without_custom_yaml_rewrite(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        self.assertNotIn("configure_video.py", script)
+        self.assertIn("YAML.load_file", script)
+        self.assertIn("chmod 0644", script)
+
+    def test_official_ruby_post_publish_hook_is_installed(self):
+        script = (ROOT / "provision" / "install.sh").read_text(encoding="utf-8")
+        hook = (ROOT / "worker" / "post_publish.rb").read_text(encoding="utf-8")
+        self.assertIn("post_publish_bcp_transport.rb", script)
+        self.assertIn('parser.on("-m MEETING_ID")', hook)
+        self.assertIn('options[:format] == "video"', hook)
 
     def test_sfu_repair_precedes_telegram_repair(self):
         control = (ROOT / "provision" / "bcpctl").read_text(encoding="utf-8")
