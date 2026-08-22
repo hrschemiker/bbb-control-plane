@@ -263,8 +263,15 @@ phase configuring_composite_recordings
 apt-get install -y bbb-playback-video
 install -d -m 0755 /etc/bigbluebutton/recording
 install -m 0644 /opt/bbb-control-plane/source/provision/recording.yml /etc/bigbluebutton/recording/recording.yml
-if [ -f /usr/local/bigbluebutton/core/scripts/video.yml ]; then
-  python3 /opt/bbb-control-plane/source/provision/configure_video.py /usr/local/bigbluebutton/core/scripts/video.yml "${VIDEO_CRF:-23}" "${VIDEO_HEIGHT:-720}"
+video_config=/usr/local/bigbluebutton/core/scripts/video.yml
+if [ -f "$video_config" ]; then
+  if ! sudo -u bigbluebutton ruby -e 'require "yaml"; YAML.load_file(ARGV[0])' "$video_config"; then
+    cp -a "$video_config" "$video_config.bcp-invalid-$(date -u +%Y%m%dT%H%M%SZ)"
+    apt-get install -y --reinstall bbb-playback-video
+  fi
+  chown root:root "$video_config"
+  chmod 0644 "$video_config"
+  sudo -u bigbluebutton ruby -e 'require "yaml"; YAML.load_file(ARGV[0])' "$video_config" || die "bbb-playback-video configuration is invalid"
 fi
 
 phase installing_telegram_transport
@@ -279,6 +286,7 @@ phase installing_recording_worker
 install -d -o bigbluebutton -g bigbluebutton -m 0750 /var/lib/bcp/jobs /var/lib/bcp/done /var/lib/bcp/failed
 install -m 0755 /opt/bbb-control-plane/source/worker/worker.py /usr/local/lib/bcp-worker.py
 install -m 0755 /opt/bbb-control-plane/source/worker/post_publish.py /usr/local/lib/bcp-post-publish.py
+install -m 0755 /opt/bbb-control-plane/source/worker/post_publish.rb /usr/local/lib/bcp-post-publish.rb
 install -m 0755 /opt/bbb-control-plane/source/provision/bcpctl /usr/local/sbin/bcpctl
 install -m 0755 /opt/bbb-control-plane/source/provision/fix-public-url.sh /usr/local/sbin/bcp-fix-public-url
 install -m 0755 /opt/bbb-control-plane/source/provision/verify-join-url.py /usr/local/lib/bcp-verify-join-url.py
@@ -286,7 +294,8 @@ install -m 0644 /opt/bbb-control-plane/source/provision/bcp-worker.service /etc/
 install -m 0644 /opt/bbb-control-plane/source/provision/bcp-retention.service /etc/systemd/system/bcp-retention.service
 install -m 0644 /opt/bbb-control-plane/source/provision/bcp-retention.timer /etc/systemd/system/bcp-retention.timer
 install -d -m 0755 /usr/local/bigbluebutton/core/scripts/post_publish
-ln -sfn /usr/local/lib/bcp-post-publish.py /usr/local/bigbluebutton/core/scripts/post_publish/bcp-post-publish.py
+rm -f /usr/local/bigbluebutton/core/scripts/post_publish/bcp-post-publish.py
+install -m 0755 /usr/local/lib/bcp-post-publish.rb /usr/local/bigbluebutton/core/scripts/post_publish/post_publish_bcp_transport.rb
 
 phase configuring_firewall_and_services
 ufw allow OpenSSH
