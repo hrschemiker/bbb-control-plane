@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+import re
 from pathlib import Path
 
 QUEUE = Path("/var/lib/bcp/jobs")
@@ -55,30 +56,57 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def external_meeting_id(record_id: str) -> str:
+def recording_metadata(record_id: str) -> dict:
     for candidate in (Path("/var/bigbluebutton/published/presentation") / record_id / "metadata.xml", Path("/var/bigbluebutton/recording/publish/presentation") / record_id / "metadata.xml"):
         if candidate.is_file():
             root = ET.parse(candidate).getroot()
+            result = {}
             meeting = root.find("meeting")
             if meeting is not None and meeting.attrib.get("externalId"):
-                return meeting.attrib["externalId"]
+                result["meeting_id"] = meeting.attrib["externalId"]
             value = root.findtext("./meta/meetingId")
-            if value: return value
-    return ""
+            if value and not result.get("meeting_id"): result["meeting_id"] = value
+            for node in root.findall("./meta/*"):
+                key = node.tag.rsplit("}", 1)[-1]
+                if node.text: result[key] = node.text.strip()
+            return result
+    return {}
 
 
-def telegram_upload(path: Path, caption: str) -> dict:
+def safe_media_name(metadata: dict) -> str:
+    student = metadata.get("gtbp_student_name", "").strip()
+    date = metadata.get("gtbp_session_date", "").strip()
+    value = " - ".join(part for part in (student, date) if part) or "class-recording"
+    value = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", value)
+    value = re.sub(r"\s+", " ", value).strip(" .-")[:140]
+    return (value or "class-recording") + ".mp4"
+
+
+def telegram_upload(path: Path, caption: str, filename: str) -> dict:
     limit = int(env("MAX_UPLOAD_MIB", "1900")) * 1024 * 1024
     if path.stat().st_size > limit:
         raise RuntimeError(f"media exceeds configured upload ceiling: {path.stat().st_size}")
-    fields = {"chat_id": env("TELEGRAM_ARCHIVE_CHAT_ID"), "caption": caption, "supports_streaming": "true", "protect_content": "true", "video": path.resolve().as_uri()}
-    request = urllib.request.Request(f"http://127.0.0.1:8081/bot{env('TELEGRAM_BOT_TOKEN')}/sendVideo", data=urllib.parse.urlencode(fields).encode(), method="POST")
-    with urllib.request.urlopen(request, timeout=7200) as response:
-        payload = json.load(response)
+    endpoint = f"http://127.0.0.1:8081/bot{env('TELEGRAM_BOT_TOKEN')}/sendVideo"
+    result = subprocess.run([
+        "curl", "--silent", "--show-error", "--max-time", "7200",
+        "--request", "POST", endpoint,
+        "--form", f"chat_id={env('TELEGRAM_ARCHIVE_CHAT_ID')}",
+        "--form", f"caption={caption}",
+        "--form", "supports_streaming=true",
+        "--form", "protect_content=true",
+        "--form", f"video=@{path.resolve()};type=video/mp4;filename={filename}",
+    ], capture_output=True, text=True, timeout=7300)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Telegram upload returned an invalid response: {result.stderr.strip()}") from exc
     if not payload.get("ok"):
         raise RuntimeError(payload.get("description", "Telegram upload failed"))
-    message = payload["result"]; video = message.get("video", {})
-    return {"message_id": message["message_id"], "chat_id": str(message["chat"]["id"]), "file_id": video.get("file_id", ""), "file_unique_id": video.get("file_unique_id", ""), "file_size": video.get("file_size", path.stat().st_size)}
+    message = payload["result"]
+    media = message.get("video") or message.get("document") or {}
+    if not media.get("file_id"):
+        raise RuntimeError("Telegram response did not include a reusable file identifier")
+    return {"message_id": message["message_id"], "chat_id": str(message["chat"]["id"]), "file_id": media["file_id"], "file_unique_id": media.get("file_unique_id", ""), "file_size": media.get("file_size", path.stat().st_size)}
 
 
 def callback(payload: dict) -> None:
@@ -98,11 +126,17 @@ def process(job_path: Path) -> None:
     video = find_video(record_id)
     if not video:
         raise RuntimeError("composite recording is not published yet")
-    probe = valid_media(video)
-    digest = sha256_file(video)
-    sent = telegram_upload(video, f"recording:{record_id}")
-    payload = {"record_id": record_id, "meeting_id": external_meeting_id(record_id), "video_url": f"https://{env('BBB_HOSTNAME')}/video/{record_id}/{video.name}", "sha256": digest, "duration": probe["format"]["duration"], **sent}
+    metadata = recording_metadata(record_id)
+    filename = safe_media_name(metadata)
+    if "telegram" not in job:
+        probe = valid_media(video)
+        sent = telegram_upload(video, filename.rsplit(".", 1)[0], filename)
+        job.update({"telegram": sent, "sha256": sha256_file(video), "duration": probe["format"]["duration"], "filename": filename, "last_error": ""})
+        job_path.write_text(json.dumps(job, ensure_ascii=False))
+    payload = {"record_id": record_id, "meeting_id": metadata.get("meeting_id", ""), "video_url": f"https://{env('BBB_HOSTNAME')}/video/{record_id}/{video.name}", "presentation_url": f"https://{env('BBB_HOSTNAME')}/playback/presentation/2.3/{record_id}", "filename": job["filename"], "sha256": job["sha256"], "duration": job["duration"], **job["telegram"]}
     callback(payload)
+    job.update({"status": "complete", "completed_at": int(time.time()), "last_error": ""})
+    job_path.write_text(json.dumps(job, ensure_ascii=False))
     DONE.mkdir(parents=True, exist_ok=True)
     os.replace(job_path, DONE / job_path.name)
 
