@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent
 STATE_DIR = Path.home() / ".bbb-control-plane"
 PROFILE_FILE = STATE_DIR / "profile.json"
 KEYRING_SERVICE = "bbb-control-plane"
-APP_VERSION = "1.3.7"
+APP_VERSION = "1.4.0"
 HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
 
 
@@ -241,6 +241,8 @@ class App(tk.Tk):
             button = ttk.Button(actions, text=text, command=lambda a=action: self._start(a))
             button.pack(side="left", padx=(0, 8)); self.action_buttons.append(button)
         ttk.Button(actions, text="COPY BRIDGE CONFIG", command=self._copy_bridge_config).pack(side="left", padx=(0, 8))
+        button = ttk.Button(actions, text="COPY WORDPRESS CONFIG", command=lambda: self._start("wordpress-config"))
+        button.pack(side="left", padx=(0, 8)); self.action_buttons.append(button)
         setup.columnconfigure(1, weight=1)
 
         ttk.Label(manage, text="WEB CONSOLES", style="Title.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
@@ -430,6 +432,20 @@ class App(tk.Tk):
                     command = "sudo install -m 0600 /tmp/bcp.env /etc/bbb-control-plane.env && rm -f /tmp/bcp.env && sudo bash /opt/bbb-control-plane/source/provision/launch.sh"
                     code, out = ssh.run(command, timeout=30000, emit=self.events.put)
                     self.events.put(f"Private recovery settings saved at {private_file}\n")
+                elif action == "wordpress-config":
+                    _payload, private_file = self._environment(v)
+                    saved = dict(line.split("=", 1) for line in private_file.read_text(encoding="utf-8").splitlines() if "=" in line)
+                    code, secret = ssh.run("sudo bbb-conf --secret | awk '/Secret:/{print $2; exit}'", timeout=60)
+                    if code or not secret.strip():
+                        raise ControllerError("BigBlueButton API secret could not be read")
+                    content = (
+                        f"Personal BBB URL: https://{v['hostname']}/bigbluebutton/\n"
+                        f"Personal BBB Secret: {secret.strip()}\n"
+                        f"Recording gateway: https://{v['hostname']}/telegram-api\n"
+                        f"Recording shared secret: {saved['BRIDGE_SHARED_SECRET']}"
+                    )
+                    self.events.put(("clipboard", content))
+                    out = "WordPress integration settings copied to the clipboard.\n"
                 else:
                     code, out = ssh.run(f"sudo /usr/local/sbin/bcpctl {shlex.quote(action)}", emit=self.events.put)
                 self.events.put(out)
@@ -449,6 +465,10 @@ class App(tk.Tk):
             if isinstance(msg, tuple) and msg[0] == "done":
                 self.progress.stop(); self.status.set("READY")
                 for button in self.action_buttons: button.configure(state="normal")
+                continue
+            if isinstance(msg, tuple) and msg[0] == "clipboard":
+                self.clipboard_clear(); self.clipboard_append(msg[1]); self.status.set("CONFIG COPIED")
+                messagebox.showinfo("WordPress configuration", "The personal BBB and recording settings are copied to the clipboard.")
                 continue
             if isinstance(msg, str) and "[bcp] PHASE:" in msg:
                 phase_name = msg.rsplit("[bcp] PHASE:", 1)[1].splitlines()[0].strip()
